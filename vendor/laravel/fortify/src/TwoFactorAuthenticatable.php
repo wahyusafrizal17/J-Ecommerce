@@ -8,10 +8,28 @@ use BaconQrCode\Renderer\ImageRenderer;
 use BaconQrCode\Renderer\RendererStyle\Fill;
 use BaconQrCode\Renderer\RendererStyle\RendererStyle;
 use BaconQrCode\Writer;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Crypt;
 use Laravel\Fortify\Contracts\TwoFactorAuthenticationProvider;
+use Laravel\Fortify\Events\RecoveryCodeReplaced;
 
 trait TwoFactorAuthenticatable
 {
+    /**
+     * Determine if two-factor authentication has been enabled.
+     *
+     * @return bool
+     */
+    public function hasEnabledTwoFactorAuthentication()
+    {
+        if (Fortify::confirmsTwoFactorAuthentication()) {
+            return ! is_null($this->two_factor_secret) &&
+                   ! is_null($this->two_factor_confirmed_at);
+        }
+
+        return ! is_null($this->two_factor_secret);
+    }
+
     /**
      * Get the user's two factor authentication recovery codes.
      *
@@ -19,7 +37,7 @@ trait TwoFactorAuthenticatable
      */
     public function recoveryCodes()
     {
-        return json_decode(decrypt($this->two_factor_recovery_codes), true);
+        return json_decode((Model::$encrypter ?? Crypt::getFacadeRoot())->decrypt($this->two_factor_recovery_codes), true);
     }
 
     /**
@@ -31,12 +49,14 @@ trait TwoFactorAuthenticatable
     public function replaceRecoveryCode($code)
     {
         $this->forceFill([
-            'two_factor_recovery_codes' => encrypt(str_replace(
+            'two_factor_recovery_codes' => (Model::$encrypter ?? Crypt::getFacadeRoot())->encrypt(str_replace(
                 $code,
                 RecoveryCode::generate(),
-                decrypt($this->two_factor_recovery_codes)
+                (Model::$encrypter ?? Crypt::getFacadeRoot())->decrypt($this->two_factor_recovery_codes)
             )),
         ])->save();
+
+        RecoveryCodeReplaced::dispatch($this, $code);
     }
 
     /**
@@ -65,8 +85,8 @@ trait TwoFactorAuthenticatable
     {
         return app(TwoFactorAuthenticationProvider::class)->qrCodeUrl(
             config('app.name'),
-            $this->email,
-            decrypt($this->two_factor_secret)
+            $this->{Fortify::username()},
+            (Model::$encrypter ?? Crypt::getFacadeRoot())->decrypt($this->two_factor_secret)
         );
     }
 }

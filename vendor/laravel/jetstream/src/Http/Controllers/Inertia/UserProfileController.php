@@ -6,11 +6,14 @@ use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
-use Jenssegers\Agent\Agent;
+use Laravel\Fortify\Features;
+use Laravel\Jetstream\Agent;
 use Laravel\Jetstream\Jetstream;
 
 class UserProfileController extends Controller
 {
+    use Concerns\ConfirmsTwoFactorAuthentication;
+
     /**
      * Show the general profile settings screen.
      *
@@ -19,7 +22,10 @@ class UserProfileController extends Controller
      */
     public function show(Request $request)
     {
+        $this->validateTwoFactorAuthenticationState($request);
+
         return Jetstream::inertia()->render($request, 'Profile/Show', [
+            'confirmsTwoFactorAuthentication' => Features::optionEnabled(Features::twoFactorAuthentication(), 'confirm'),
             'sessions' => $this->sessions($request)->all(),
         ]);
     }
@@ -61,12 +67,10 @@ class UserProfileController extends Controller
      * Create a new agent instance from the given session.
      *
      * @param  mixed  $session
-     * @return \Jenssegers\Agent\Agent
+     * @return \Laravel\Jetstream\Agent
      */
     protected function createAgent($session)
     {
-        return tap(new Agent, function ($agent) use ($session) {
-            $agent->setUserAgent($session->user_agent);
-        });
+        return tap(new Agent(), fn ($agent) => $agent->setUserAgent($session->user_agent));
     }
 }

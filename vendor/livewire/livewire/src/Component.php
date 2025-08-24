@@ -2,239 +2,131 @@
 
 namespace Livewire;
 
-use Illuminate\View\View;
-use BadMethodCallException;
-use Illuminate\Support\Str;
-use Illuminate\Routing\Route;
-use Illuminate\Support\ViewErrorBag;
-use Illuminate\Support\Traits\Macroable;
-use Illuminate\Contracts\Container\Container;
-use Livewire\Exceptions\CannotUseReservedLivewireComponentProperties;
+use Livewire\Features\SupportDisablingBackButtonCache\HandlesDisablingBackButtonCache;
+use Livewire\Features\SupportPageComponents\HandlesPageComponents;
+use Livewire\Features\SupportJsEvaluation\HandlesJsEvaluation;
+use Livewire\Features\SupportAttributes\HandlesAttributes;
+use Livewire\Features\SupportValidation\HandlesValidation;
+use Livewire\Features\SupportStreaming\HandlesStreaming;
+use Livewire\Features\SupportRedirects\HandlesRedirects;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Livewire\Features\SupportEvents\HandlesEvents;
 use Livewire\Exceptions\PropertyNotFoundException;
+use Livewire\Concerns\InteractsWithProperties;
+use Illuminate\Support\Traits\Macroable;
+use BadMethodCallException;
+use Livewire\Features\SupportFormObjects\HandlesFormObjects;
 
 abstract class Component
 {
     use Macroable { __call as macroCall; }
 
-    use ComponentConcerns\ValidatesInput,
-        ComponentConcerns\HandlesActions,
-        ComponentConcerns\ReceivesEvents,
-        ComponentConcerns\PerformsRedirects,
-        ComponentConcerns\TracksRenderedChildren,
-        ComponentConcerns\InteractsWithProperties;
+    use AuthorizesRequests;
+    use InteractsWithProperties;
+    use HandlesEvents;
+    use HandlesRedirects;
+    use HandlesStreaming;
+    use HandlesAttributes;
+    use HandlesValidation;
+    use HandlesFormObjects;
+    use HandlesJsEvaluation;
+    use HandlesPageComponents;
+    use HandlesDisablingBackButtonCache;
 
-    public $id;
+    protected $__id;
+    protected $__name;
 
-    protected $queryString = [];
-    protected $computedPropertyCache = [];
-    protected $initialLayoutConfiguration = [];
-    protected $shouldSkipRender = false;
-    protected $preRenderedView;
-
-    public function __construct($id = null)
+    function id()
     {
-        $this->id = $id ?? str()->random(20);
-
-        $this->ensureIdPropertyIsntOverridden();
+        return $this->getId();
     }
 
-    public function __invoke(Container $container, Route $route)
+    function setId($id)
     {
-        $componentParams = (new ImplicitRouteBinding($container))
-            ->resolveAllParameters($route, $this);
-
-        $manager = LifecycleManager::fromInitialInstance($this)
-            ->initialHydrate()
-            ->mount($componentParams)
-            ->renderToView();
-
-        if ($this->redirectTo) {
-            return redirect()->response($this->redirectTo);
-        }
-
-        $layoutType = $this->initialLayoutConfiguration['type'] ?? 'component';
-
-        return app('view')->file(__DIR__."/Macros/livewire-view-{$layoutType}.blade.php", [
-            'view' => $this->initialLayoutConfiguration['view'] ?? config('livewire.layout'),
-            'params' => $this->initialLayoutConfiguration['params'] ?? [],
-            'slotOrSection' => $this->initialLayoutConfiguration['slotOrSection'] ?? [
-                'extends' => 'content', 'component' => 'slot',
-            ][$layoutType],
-            'manager' => $manager,
-        ]);
+        $this->__id = $id;
     }
 
-    protected function ensureIdPropertyIsntOverridden()
+    function getId()
     {
-        throw_if(
-            array_key_exists('id', $this->getPublicPropertiesDefinedBySubClass()),
-            new CannotUseReservedLivewireComponentProperties('id', $this::getName())
-        );
+        return $this->__id;
     }
 
-    public function initializeTraits()
+    function setName($name)
     {
-        foreach (class_uses_recursive($class = static::class) as $trait) {
-            if (method_exists($class, $method = 'initialize'.class_basename($trait))) {
-                $this->{$method}();
+        $this->__name = $name;
+    }
+
+    function getName()
+    {
+        return $this->__name;
+    }
+
+    function skipRender($html = null)
+    {
+        store($this)->set('skipRender', $html ?: true);
+    }
+
+    function skipMount()
+    {
+        store($this)->set('skipMount', true);
+    }
+
+    function skipHydrate()
+    {
+        store($this)->set('skipHydrate', true);
+    }
+
+    function __isset($property)
+    {
+        try {
+            $value = $this->__get($property);
+
+            if (isset($value)) {
+                return true;
             }
-        }
+        } catch(PropertyNotFoundException $ex) {}
+
+        return false;
     }
 
-    public static function getName()
+    function __get($property)
     {
-        $namespace = collect(explode('.', str_replace(['/', '\\'], '.', config('livewire.class_namespace'))))
-            ->map([Str::class, 'kebab'])
-            ->implode('.');
+        $value = 'noneset';
 
-        $fullName = collect(explode('.', str_replace(['/', '\\'], '.', static::class)))
-            ->map([Str::class, 'kebab'])
-            ->implode('.');
+        $returnValue = function ($newValue) use (&$value) {
+            $value = $newValue;
+        };
 
-        if (str($fullName)->startsWith($namespace)) {
-            return (string) str($fullName)->substr(strlen($namespace) + 1);
-        }
+        $finish = trigger('__get', $this, $property, $returnValue);
 
-        return $fullName;
-    }
+        $value = $finish($value);
 
-    public function getQueryString()
-    {
-        return $this->queryString;
-    }
-
-    public function skipRender()
-    {
-        $this->shouldSkipRender = true;
-    }
-
-    public function renderToView()
-    {
-        if ($this->shouldSkipRender) return null;
-
-        Livewire::dispatch('component.rendering', $this);
-
-        $view = method_exists($this, 'render')
-            ? app()->call([$this, 'render'])
-            : view("livewire.{$this::getName()}");
-
-        if (is_string($view)) {
-            $view = app('view')->make(CreateBladeView::fromString($view));
+        if ($value === 'noneset') {
+            throw new PropertyNotFoundException($property, $this->getName());
         }
 
-        throw_unless($view instanceof View,
-            new \Exception('"render" method on ['.get_class($this).'] must return instance of ['.View::class.']'));
-
-        // Get the layout config from the view.
-        if ($view->livewireLayout) {
-            $this->initialLayoutConfiguration = $view->livewireLayout;
-        }
-
-        Livewire::dispatch('component.rendered', $this, $view);
-
-        return $this->preRenderedView = $view;
+        return $value;
     }
 
-    public function output($errors = null)
+    function __unset($property)
     {
-        if ($this->shouldSkipRender) return null;
-
-        $view = $this->preRenderedView;
-
-        // In the service provider, we hijack Laravel's Blade engine
-        // with our own. However, we only want Livewire hijackings,
-        // while we're rendering Livewire components. So we'll
-        // activate it here, and deactivate it at the end
-        // of this method.
-        $engine = app('view.engine.resolver')->resolve('blade');
-        $engine->startLivewireRendering($this);
-
-        $this->setErrorBag(
-            $errorBag = $errors ?: ($view->getData()['errors'] ?? $this->getErrorBag())
-        );
-
-        $previouslySharedErrors = app('view')->getShared()['errors'] ?? new ViewErrorBag;
-        $previouslySharedInstance = app('view')->getShared()['_instance'] ?? null;
-
-        $errors = (new ViewErrorBag)->put('default', $errorBag);
-
-        $errors->getBag('default')->merge(
-            $previouslySharedErrors->getBag('default')
-        );
-
-        $view->with([
-            'errors' => $errors,
-            '_instance' => $this,
-        ] + $this->getPublicPropertiesDefinedBySubClass());
-
-        app('view')->share('errors', $errors);
-        app('view')->share('_instance', $this);
-
-        $output = $view->render();
-
-        app('view')->share('errors', $previouslySharedErrors);
-        app('view')->share('_instance', $previouslySharedInstance);
-
-        Livewire::dispatch('view:render', $view);
-
-        $engine->endLivewireRendering();
-
-        return $output;
+        trigger('__unset', $this, $property);
     }
 
-    public function normalizePublicPropertiesForJavaScript()
+    function __call($method, $params)
     {
-        foreach ($this->getPublicPropertiesDefinedBySubClass() as $key => $value) {
-            if (is_array($value)) {
-                $this->$key = $this->reindexArrayWithNumericKeysOtherwiseJavaScriptWillMessWithTheOrder($value);
-            }
+        $value = 'noneset';
 
-            if ($value instanceof EloquentCollection) {
-                // Preserve collection items order by reindexing underlying array.
-                $this->$key = $value->values();
-            }
-        }
-    }
+        $returnValue = function ($newValue) use (&$value) {
+            $value = $newValue;
+        };
 
-    public function forgetComputed($key = null)
-    {
-        if (is_null($key)) {
-           $this->computedPropertyCache = [];
-           return;
-        }
+        $finish = trigger('__call', $this, $method, $params, $returnValue);
 
-        $keys = is_array($key) ? $key : func_get_args();
+        $value = $finish($value);
 
-        collect($keys)->each(function ($i) {
-            if (isset($this->computedPropertyCache[$i])) {
-                unset($this->computedPropertyCache[$i]);
-            }
-        });
-    }
-
-    public function __get($property)
-    {
-        $studlyProperty = str_replace(' ', '', ucwords(str_replace(['-', '_'], ' ', $property)));
-
-        if (method_exists($this, $computedMethodName = 'get'.$studlyProperty.'Property')) {
-            if (isset($this->computedPropertyCache[$property])) {
-                return $this->computedPropertyCache[$property];
-            }
-
-            return $this->computedPropertyCache[$property] = app()->call([$this, $computedMethodName]);
-        }
-
-        throw new PropertyNotFoundException($property, static::getName());
-    }
-
-    public function __call($method, $params)
-    {
-        if (
-            in_array($method, ['mount', 'hydrate', 'dehydrate', 'updating', 'updated'])
-            || str($method)->startsWith(['updating', 'updated', 'hydrate', 'dehydrate'])
-        ) {
-            // Eat calls to the lifecycle hooks if the dev didn't define them.
-            return;
+        if ($value !== 'noneset') {
+            return $value;
         }
 
         if (static::hasMacro($method)) {
@@ -244,5 +136,12 @@ abstract class Component
         throw new BadMethodCallException(sprintf(
             'Method %s::%s does not exist.', static::class, $method
         ));
+    }
+
+    public function tap($callback)
+    {
+        $callback($this);
+
+        return $this;
     }
 }

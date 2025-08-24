@@ -6,6 +6,7 @@ use Illuminate\Container\BoundMethod;
 use Illuminate\Contracts\Routing\UrlRoutable as ImplicitlyBindable;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use ReflectionClass;
+use ReflectionNamedType;
 
 class ImplicitlyBoundMethod extends BoundMethod
 {
@@ -75,22 +76,36 @@ class ImplicitlyBoundMethod extends BoundMethod
 
     protected static function getClassForDependencyInjection($parameter)
     {
-        if (! is_null($className = static::getParameterClassName($parameter)) && ! static::implementsInterface($parameter)) {
-            return $className;
-        }
+        $className = static::getParameterClassName($parameter);
+
+        if (is_null($className)) return null;
+
+        if (static::isEnum($parameter)) return null;
+
+        if (! static::implementsInterface($parameter)) return $className;
+
+        return null;
     }
 
     protected static function getClassForImplicitBinding($parameter)
     {
-        if (! is_null($className = static::getParameterClassName($parameter)) && static::implementsInterface($parameter)) {
-            return $className;
-        }
+        $className = static::getParameterClassName($parameter);
+
+        if (is_null($className)) return null;
+
+        if (static::isEnum($parameter)) return $className;
+
+        if (static::implementsInterface($parameter)) return $className;
 
         return null;
     }
 
     protected static function getImplicitBinding($container, $className, $value)
     {
+        if ((new ReflectionClass($className))->isEnum()) {
+            return $className::tryFrom($value);
+        }
+
         $model = $container->make($className)->resolveRouteBinding($value);
 
         if (! $model) {
@@ -104,11 +119,20 @@ class ImplicitlyBoundMethod extends BoundMethod
     {
         $type = $parameter->getType();
 
-        return ($type && ! $type->isBuiltin()) ? $type->getName() : null;
+        if (! $type) return null;
+
+        if (! $type instanceof ReflectionNamedType) return null;
+
+        return (! $type->isBuiltin()) ? $type->getName() : null;
     }
 
     public static function implementsInterface($parameter)
     {
         return (new ReflectionClass($parameter->getType()->getName()))->implementsInterface(ImplicitlyBindable::class);
+    }
+
+    public static function isEnum($parameter)
+    {
+        return (new ReflectionClass($parameter->getType()->getName()))->isEnum();
     }
 }

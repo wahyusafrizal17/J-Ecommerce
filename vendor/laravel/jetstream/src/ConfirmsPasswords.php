@@ -41,16 +41,16 @@ trait ConfirmsPasswords
         $this->resetErrorBag();
 
         if ($this->passwordIsConfirmed()) {
-            return $this->dispatchBrowserEvent('password-confirmed', [
-                'id' => $confirmableId,
-            ]);
+            return $this->dispatch('password-confirmed',
+                id: $confirmableId,
+            );
         }
 
         $this->confirmingPassword = true;
         $this->confirmableId = $confirmableId;
         $this->confirmablePassword = '';
 
-        $this->dispatchBrowserEvent('confirming-password');
+        $this->dispatch('confirming-password');
     }
 
     /**
@@ -80,9 +80,9 @@ trait ConfirmsPasswords
 
         session(['auth.password_confirmed_at' => time()]);
 
-        $this->dispatchBrowserEvent('password-confirmed', [
-            'id' => $this->confirmableId,
-        ]);
+        $this->dispatch('password-confirmed',
+            id: $this->confirmableId,
+        );
 
         $this->stopConfirmingPassword();
     }
@@ -97,7 +97,7 @@ trait ConfirmsPasswords
     {
         $maximumSecondsSinceConfirmation = $maximumSecondsSinceConfirmation ?: config('auth.password_timeout', 900);
 
-        return $this->passwordIsConfirmed($maximumSecondsSinceConfirmation) ? null : abort(403);
+        $this->passwordIsConfirmed($maximumSecondsSinceConfirmation) ? null : abort(403);
     }
 
     /**

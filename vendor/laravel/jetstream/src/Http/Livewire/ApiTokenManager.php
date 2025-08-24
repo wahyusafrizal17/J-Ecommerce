@@ -103,7 +103,7 @@ class ApiTokenManager extends Component
         $this->createApiTokenForm['name'] = '';
         $this->createApiTokenForm['permissions'] = Jetstream::$defaultPermissions;
 
-        $this->emit('created');
+        $this->dispatch('created');
     }
 
     /**
@@ -118,7 +118,7 @@ class ApiTokenManager extends Component
 
         $this->plainTextToken = explode('|', $token->plainTextToken, 2)[1];
 
-        $this->dispatchBrowserEvent('showing-token-modal');
+        $this->dispatch('showing-token-modal');
     }
 
     /**
@@ -172,7 +172,7 @@ class ApiTokenManager extends Component
      */
     public function deleteApiToken()
     {
-        $this->user->tokens()->where('id', $this->apiTokenIdBeingDeleted)->delete();
+        $this->user->tokens()->where('id', $this->apiTokenIdBeingDeleted)->first()->delete();
 
         $this->user->load('tokens');
 

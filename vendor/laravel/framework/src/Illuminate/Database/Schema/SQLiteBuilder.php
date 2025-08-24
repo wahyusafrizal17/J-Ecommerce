@@ -2,6 +2,7 @@
 
 namespace Illuminate\Database\Schema;
 
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\File;
 
 class SQLiteBuilder extends Builder
@@ -9,7 +10,7 @@ class SQLiteBuilder extends Builder
     /**
      * Create a database in the schema.
      *
-     * @param  string $name
+     * @param  string  $name
      * @return bool
      */
     public function createDatabase($name)
@@ -20,7 +21,7 @@ class SQLiteBuilder extends Builder
     /**
      * Drop a database from the schema if the database exists.
      *
-     * @param  string $name
+     * @param  string  $name
      * @return bool
      */
     public function dropDatabaseIfExists($name)
@@ -28,6 +29,55 @@ class SQLiteBuilder extends Builder
         return File::exists($name)
             ? File::delete($name)
             : true;
+    }
+
+    /**
+     * Get the tables for the database.
+     *
+     * @param  bool  $withSize
+     * @return array
+     */
+    public function getTables($withSize = true)
+    {
+        if ($withSize) {
+            try {
+                $withSize = $this->connection->scalar($this->grammar->compileDbstatExists());
+            } catch (QueryException $e) {
+                $withSize = false;
+            }
+        }
+
+        return $this->connection->getPostProcessor()->processTables(
+            $this->connection->selectFromWriteConnection($this->grammar->compileTables($withSize))
+        );
+    }
+
+    /**
+     * Get all of the table names for the database.
+     *
+     * @deprecated Will be removed in a future Laravel version.
+     *
+     * @return array
+     */
+    public function getAllTables()
+    {
+        return $this->connection->select(
+            $this->grammar->compileGetAllTables()
+        );
+    }
+
+    /**
+     * Get all of the view names for the database.
+     *
+     * @deprecated Will be removed in a future Laravel version.
+     *
+     * @return array
+     */
+    public function getAllViews()
+    {
+        return $this->connection->select(
+            $this->grammar->compileGetAllViews()
+        );
     }
 
     /**

@@ -5,7 +5,6 @@ namespace Laravel\Jetstream\Http\Controllers\Inertia;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Gate;
-use Inertia\Inertia;
 use Laravel\Jetstream\Actions\ValidateTeamDeletion;
 use Laravel\Jetstream\Contracts\CreatesTeams;
 use Laravel\Jetstream\Contracts\DeletesTeams;
@@ -28,9 +27,7 @@ class TeamController extends Controller
     {
         $team = Jetstream::newTeamModel()->findOrFail($teamId);
 
-        if (Gate::denies('view', $team)) {
-            abort(403);
-        }
+        Gate::authorize('view', $team);
 
         return Jetstream::inertia()->render($request, 'Teams/Show', [
             'team' => $team->load('owner', 'users', 'teamInvitations'),
@@ -42,6 +39,7 @@ class TeamController extends Controller
                 'canDeleteTeam' => Gate::check('delete', $team),
                 'canRemoveTeamMembers' => Gate::check('removeTeamMember', $team),
                 'canUpdateTeam' => Gate::check('update', $team),
+                'canUpdateTeamMembers' => Gate::check('updateTeamMember', $team),
             ],
         ]);
     }
@@ -54,7 +52,9 @@ class TeamController extends Controller
      */
     public function create(Request $request)
     {
-        return Inertia::render('Teams/Create');
+        Gate::authorize('create', Jetstream::newTeamModel());
+
+        return Jetstream::inertia()->render($request, 'Teams/Create');
     }
 
     /**

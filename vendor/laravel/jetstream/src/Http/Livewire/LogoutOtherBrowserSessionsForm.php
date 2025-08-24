@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
-use Jenssegers\Agent\Agent;
+use Laravel\Jetstream\Agent;
 use Livewire\Component;
 
 class LogoutOtherBrowserSessionsForm extends Component
@@ -28,7 +28,7 @@ class LogoutOtherBrowserSessionsForm extends Component
     public $password = '';
 
     /**
-     * Confirm that the user would like to logout from other browser sessions.
+     * Confirm that the user would like to log out from other browser sessions.
      *
      * @return void
      */
@@ -36,19 +36,23 @@ class LogoutOtherBrowserSessionsForm extends Component
     {
         $this->password = '';
 
-        $this->dispatchBrowserEvent('confirming-logout-other-browser-sessions');
+        $this->dispatch('confirming-logout-other-browser-sessions');
 
         $this->confirmingLogout = true;
     }
 
     /**
-     * Logout from other browser sessions.
+     * Log out from other browser sessions.
      *
      * @param  \Illuminate\Contracts\Auth\StatefulGuard  $guard
      * @return void
      */
     public function logoutOtherBrowserSessions(StatefulGuard $guard)
     {
+        if (config('session.driver') !== 'database') {
+            return;
+        }
+
         $this->resetErrorBag();
 
         if (! Hash::check($this->password, Auth::user()->password)) {
@@ -61,9 +65,13 @@ class LogoutOtherBrowserSessionsForm extends Component
 
         $this->deleteOtherSessionRecords();
 
+        request()->session()->put([
+            'password_hash_'.Auth::getDefaultDriver() => Auth::user()->getAuthPassword(),
+        ]);
+
         $this->confirmingLogout = false;
 
-        $this->emit('loggedOut');
+        $this->dispatch('loggedOut');
     }
 
     /**
@@ -113,13 +121,11 @@ class LogoutOtherBrowserSessionsForm extends Component
      * Create a new agent instance from the given session.
      *
      * @param  mixed  $session
-     * @return \Jenssegers\Agent\Agent
+     * @return \Laravel\Jetstream\Agent
      */
     protected function createAgent($session)
     {
-        return tap(new Agent, function ($agent) use ($session) {
-            $agent->setUserAgent($session->user_agent);
-        });
+        return tap(new Agent(), fn ($agent) => $agent->setUserAgent($session->user_agent));
     }
 
     /**

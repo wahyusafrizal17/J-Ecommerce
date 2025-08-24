@@ -2,351 +2,275 @@
 
 namespace Livewire;
 
-use Exception;
-use Livewire\Testing\TestableLivewire;
-use Illuminate\Contracts\Auth\Authenticatable;
-use Livewire\Exceptions\ComponentNotFoundException;
+use Livewire\Mechanisms\PersistentMiddleware\PersistentMiddleware;
+use Livewire\Mechanisms\HandleRequests\HandleRequests;
+use Livewire\Mechanisms\HandleComponents\HandleComponents;
+use Livewire\Mechanisms\HandleComponents\ComponentContext;
+use Livewire\Mechanisms\FrontendAssets\FrontendAssets;
+use Livewire\Mechanisms\ExtendBlade\ExtendBlade;
+use Livewire\Mechanisms\ComponentRegistry;
+use Livewire\Features\SupportTesting\Testable;
+use Livewire\Features\SupportTesting\DuskTestable;
+use Livewire\Features\SupportAutoInjectedAssets\SupportAutoInjectedAssets;
+use Livewire\Features\SupportLazyLoading\SupportLazyLoading;
 
 class LivewireManager
 {
-    protected $listeners = [];
-    protected $componentAliases = [];
+    protected LivewireServiceProvider $provider;
+
+    function setProvider(LivewireServiceProvider $provider)
+    {
+        $this->provider = $provider;
+    }
+
+    function provide($callback)
+    {
+        \Closure::bind($callback, $this->provider, $this->provider::class)();
+    }
+
+    function component($name, $class = null)
+    {
+        app(ComponentRegistry::class)->component($name, $class);
+    }
+
+    function componentHook($hook)
+    {
+        ComponentHookRegistry::register($hook);
+    }
+
+    function propertySynthesizer($synth)
+    {
+        app(HandleComponents::class)->registerPropertySynthesizer($synth);
+    }
+
+    function directive($name, $callback)
+    {
+        app(ExtendBlade::class)->livewireOnlyDirective($name, $callback);
+    }
+
+    function precompiler($callback)
+    {
+        app(ExtendBlade::class)->livewireOnlyPrecompiler($callback);
+    }
+
+    function new($name, $id = null)
+    {
+        return app(ComponentRegistry::class)->new($name, $id);
+    }
+
+    function isDiscoverable($componentNameOrClass)
+    {
+        return app(ComponentRegistry::class)->isDiscoverable($componentNameOrClass);
+    }
+
+    function resolveMissingComponent($resolver)
+    {
+        return app(ComponentRegistry::class)->resolveMissingComponent($resolver);
+    }
+
+    function mount($name, $params = [], $key = null)
+    {
+        return app(HandleComponents::class)->mount($name, $params, $key);
+    }
+
+    function snapshot($component)
+    {
+        return app(HandleComponents::class)->snapshot($component);
+    }
+
+    function fromSnapshot($snapshot)
+    {
+        return app(HandleComponents::class)->fromSnapshot($snapshot);
+    }
+
+    function listen($eventName, $callback) {
+        return on($eventName, $callback);
+    }
+
+    function current()
+    {
+        return last(app(HandleComponents::class)::$componentStack);
+    }
+
+    function findSynth($keyOrTarget, $component)
+    {
+        return app(HandleComponents::class)->findSynth($keyOrTarget, $component);
+    }
+
+    function update($snapshot, $diff, $calls)
+    {
+        return app(HandleComponents::class)->update($snapshot, $diff, $calls);
+    }
+
+    function updateProperty($component, $path, $value)
+    {
+        $dummyContext = new ComponentContext($component, false);
+
+        $updatedHook = app(HandleComponents::class)->updateProperty($component, $path, $value, $dummyContext);
+
+        $updatedHook();
+    }
+
+    function isLivewireRequest()
+    {
+        return app(HandleRequests::class)->isLivewireRequest();
+    }
+
+    function componentHasBeenRendered()
+    {
+        return SupportAutoInjectedAssets::$hasRenderedAComponentThisRequest;
+    }
+
+    function forceAssetInjection()
+    {
+        SupportAutoInjectedAssets::$forceAssetInjection = true;
+    }
+
+    function setUpdateRoute($callback)
+    {
+        return app(HandleRequests::class)->setUpdateRoute($callback);
+    }
+
+    function getUpdateUri()
+    {
+        return app(HandleRequests::class)->getUpdateUri();
+    }
+
+    function setScriptRoute($callback)
+    {
+        return app(FrontendAssets::class)->setScriptRoute($callback);
+    }
+
+    function useScriptTagAttributes($attributes)
+    {
+        return app(FrontendAssets::class)->useScriptTagAttributes($attributes);
+    }
+
     protected $queryParamsForTesting = [];
 
-    protected $persistentMiddleware = [
-        \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
-        \Laravel\Jetstream\Http\Middleware\AuthenticateSession::class,
-        \Illuminate\Auth\Middleware\AuthenticateWithBasicAuth::class,
-        \Illuminate\Routing\Middleware\SubstituteBindings::class,
-        \App\Http\Middleware\RedirectIfAuthenticated::class,
-        \Illuminate\Auth\Middleware\Authenticate::class,
-        \Illuminate\Auth\Middleware\Authorize::class,
-        \App\Http\Middleware\Authenticate::class,
-    ];
+    protected $cookiesForTesting = [];
 
-    public static $isLivewireRequestTestingOverride = false;
+    protected $headersForTesting = [];
 
-    public function component($alias, $viewClass = null)
+    function withUrlParams($params)
     {
-        if (is_null($viewClass)) {
-            $viewClass = $alias;
-            $alias = $viewClass::getName();
-        }
-
-        $this->componentAliases[$alias] = $viewClass;
+        return $this->withQueryParams($params);
     }
 
-    public function getAlias($class, $default = null)
+    function withQueryParams($params)
     {
-        $alias = array_search($class, $this->componentAliases);
-
-        return $alias === false ? $default : $alias;
-    }
-
-    public function getClass($alias)
-    {
-        $finder = app(LivewireComponentsFinder::class);
-
-        $class = false;
-
-        $class = $class ?: (
-            // Let's first check if the user registered the component using:
-            // Livewire::component('name', [Livewire component class]);
-            // If not, we'll look in the auto-discovery manifest.
-            $this->componentAliases[$alias] ?? $finder->find($alias)
-        );
-
-        $class = $class ?: (
-            // If none of the above worked, our last-ditch effort will be
-            // to re-generate the auto-discovery manifest and look again.
-            $finder->build()->find($alias)
-        );
-
-        throw_unless($class, new ComponentNotFoundException(
-            "Unable to find component: [{$alias}]"
-        ));
-
-        return $class;
-    }
-
-    public function getInstance($component, $id)
-    {
-        $componentClass = $this->getClass($component);
-
-        throw_unless(class_exists($componentClass), new ComponentNotFoundException(
-            "Component [{$component}] class not found: [{$componentClass}]"
-        ));
-
-        return new $componentClass($id);
-    }
-
-    public function mount($name, $params = [])
-    {
-        // This is if a user doesn't pass params, BUT passes key() as the second argument.
-        if (is_string($params)) $params = [];
-
-        $id = str()->random(20);
-
-        if (class_exists($name)) {
-            $name = $name::getName();
-        }
-
-        return LifecycleManager::fromInitialRequest($name, $id)
-            ->initialHydrate()
-            ->mount($params)
-            ->renderToView()
-            ->initialDehydrate()
-            ->toInitialResponse();
-    }
-
-    public function dummyMount($id, $tagName)
-    {
-        return "<{$tagName} wire:id=\"{$id}\"></{$tagName}>";
-    }
-
-    public function test($name, $params = [])
-    {
-        return new TestableLivewire($name, $params, $this->queryParamsForTesting);
-    }
-
-    public function visit($browser, $class, $queryString = '')
-    {
-        $url = '/livewire-dusk/'.urlencode($class).$queryString;
-
-        return $browser->visit($url)->waitForLivewireToLoad();
-    }
-
-    public function actingAs(Authenticatable $user, $driver = null)
-    {
-        // This is a helper to be used during testing.
-
-        if (isset($user->wasRecentlyCreated) && $user->wasRecentlyCreated) {
-            $user->wasRecentlyCreated = false;
-        }
-
-        auth()->guard($driver)->setUser($user);
-
-        auth()->shouldUse($driver);
+        $this->queryParamsForTesting = $params;
 
         return $this;
     }
 
-    public function addPersistentMiddleware($middleware)
+    function withCookie($name, $value)
     {
-        $this->persistentMiddleware = array_merge($this->persistentMiddleware, (array) $middleware);
+        $this->cookiesForTesting[$name] = $value;
+
+        return $this;
     }
 
-    public function setPersistentMiddleware($middleware)
+    function withCookies($cookies)
     {
-        $this->persistentMiddleware = (array) $middleware;
+        $this->cookiesForTesting = array_merge($this->cookiesForTesting, $cookies);
+
+        return $this;
     }
 
-    public function getPersistentMiddleware()
+    function withHeaders($headers)
     {
-        return $this->persistentMiddleware;
+        $this->headersForTesting = array_merge($this->headersForTesting, $headers);
+
+        return $this;
     }
 
-    public function styles($options = [])
+    function withoutLazyLoading()
     {
-        $debug = config('app.debug');
+        SupportLazyLoading::disableWhileTesting();
 
-        $styles = $this->cssAssets();
-
-        // HTML Label.
-        $html = $debug ? ['<!-- Livewire Styles -->'] : [];
-
-        // CSS assets.
-        $html[] = $debug ? $styles : $this->minify($styles);
-
-        return implode("\n", $html);
+        return $this;
     }
 
-    public function scripts($options = [])
+    function test($name, $params = [])
     {
-        $debug = config('app.debug');
-
-        $scripts = $this->javaScriptAssets($options);
-
-        // HTML Label.
-        $html = $debug ? ['<!-- Livewire Scripts -->'] : [];
-
-        // JavaScript assets.
-        $html[] = $debug ? $scripts : $this->minify($scripts);
-
-        return implode("\n", $html);
-    }
-
-    protected function cssAssets()
-    {
-        return <<<HTML
-<style>
-    [wire\:loading], [wire\:loading\.delay], [wire\:loading\.inline-block], [wire\:loading\.inline], [wire\:loading\.block], [wire\:loading\.flex], [wire\:loading\.table], [wire\:loading\.grid] {
-        display: none;
-    }
-
-    [wire\:offline] {
-        display: none;
-    }
-
-    [wire\:dirty]:not(textarea):not(input):not(select) {
-        display: none;
-    }
-
-    input:-webkit-autofill, select:-webkit-autofill, textarea:-webkit-autofill {
-        animation-duration: 50000s;
-        animation-name: livewireautofill;
-    }
-
-    @keyframes livewireautofill { from {} }
-</style>
-HTML;
-    }
-
-    protected function javaScriptAssets($options)
-    {
-        $jsonEncodedOptions = $options ? json_encode($options) : '';
-
-        $devTools = null;
-
-        if (config('app.debug')) {
-            $devTools = 'window.livewire.devTools(true);';
-        }
-
-        $appUrl = config('livewire.asset_url') ?: rtrim($options['asset_url'] ?? '', '/');
-
-        $csrf = csrf_token();
-
-        $manifest = json_decode(file_get_contents(__DIR__.'/../dist/manifest.json'), true);
-        $versionedFileName = $manifest['/livewire.js'];
-
-        // Default to dynamic `livewire.js` (served by a Laravel route).
-        $fullAssetPath = "{$appUrl}/livewire{$versionedFileName}";
-        $assetWarning = null;
-
-        $nonce = isset($options['nonce']) ? "nonce=\"{$options['nonce']}\"" : '';
-
-        // Use static assets if they have been published
-        if (file_exists(public_path('vendor/livewire/manifest.json'))) {
-            $publishedManifest = json_decode(file_get_contents(public_path('vendor/livewire/manifest.json')), true);
-            $versionedFileName = $publishedManifest['/livewire.js'];
-
-            $fullAssetPath = ($this->isOnVapor() ? config('app.asset_url') : $appUrl).'/vendor/livewire'.$versionedFileName;
-
-            if ($manifest !== $publishedManifest) {
-                $assetWarning = <<<'HTML'
-<script {$nonce}>
-    console.warn("Livewire: The published Livewire assets are out of date\n See: https://laravel-livewire.com/docs/installation/")
-</script>
-HTML;
-            }
-        }
-
-        // Adding semicolons for this JavaScript is important,
-        // because it will be minified in production.
-        return <<<HTML
-{$assetWarning}
-<script src="{$fullAssetPath}" data-turbo-eval="false" data-turbolinks-eval="false"></script>
-<script data-turbo-eval="false" data-turbolinks-eval="false"{$nonce}>
-    if (window.livewire) {
-        console.warn('Livewire: It looks like Livewire\'s @livewireScripts JavaScript assets have already been loaded. Make sure you aren\'t loading them twice.')
-    }
-
-    window.livewire = new Livewire({$jsonEncodedOptions});
-    {$devTools}
-    window.Livewire = window.livewire;
-    window.livewire_app_url = '{$appUrl}';
-    window.livewire_token = '{$csrf}';
-
-    /* Make sure Livewire loads first. */
-    if (window.Alpine) {
-        /* Defer showing the warning so it doesn't get buried under downstream errors. */
-        document.addEventListener("DOMContentLoaded", function () {
-            setTimeout(function() {
-                console.warn("Livewire: It looks like AlpineJS has already been loaded. Make sure Livewire\'s scripts are loaded before Alpine.\\n\\n Reference docs for more info: http://laravel-livewire.com/docs/alpine-js")
-            })
-        });
-    }
-
-    /* Make Alpine wait until Livewire is finished rendering to do its thing. */
-    window.deferLoadingAlpine = function (callback) {
-        window.addEventListener('livewire:load', function () {
-            callback();
-        });
-    };
-
-    document.addEventListener("DOMContentLoaded", function () {
-        window.livewire.start();
-    });
-</script>
-HTML;
-    }
-
-    protected function minify($subject)
-    {
-        return preg_replace('~(\v|\t|\s{2,})~m', '', $subject);
-    }
-
-    public function isDefinitelyLivewireRequest()
-    {
-        $route = request()->route();
-
-        if (! $route && app()->runningUnitTests()) {
-            return false;
-        }
-
-        throw_unless(
-            $route,
-            new Exception('It\'s too early in the request to call Livewire::isDefinitelyLivewireRequest().')
+        return Testable::create(
+            $name,
+            $params,
+            $this->queryParamsForTesting,
+            $this->cookiesForTesting,
+            $this->headersForTesting,
         );
-
-        return $route->named('livewire.message');
-
     }
 
-    public function isProbablyLivewireRequest()
+    function visit($name)
     {
-        if (static::$isLivewireRequestTestingOverride) return true;
-
-        return request()->hasHeader('X-Livewire');
+        return DuskTestable::create($name, $params = [], $this->queryParamsForTesting);
     }
 
-    public function originalUrl()
+    function actingAs(\Illuminate\Contracts\Auth\Authenticatable $user, $driver = null)
     {
-        if ($this->isDefinitelyLivewireRequest()) {
-            return request('fingerprint')['url'];
+         Testable::actingAs($user, $driver);
+
+         return $this;
+    }
+
+    function isRunningServerless()
+    {
+        return in_array($_ENV['SERVER_SOFTWARE'] ?? null, [
+            'vapor',
+            'bref',
+        ]);
+    }
+
+    function addPersistentMiddleware($middleware)
+    {
+        app(PersistentMiddleware::class)->addPersistentMiddleware($middleware);
+    }
+
+    function setPersistentMiddleware($middleware)
+    {
+        app(PersistentMiddleware::class)->setPersistentMiddleware($middleware);
+    }
+
+    function getPersistentMiddleware()
+    {
+        return app(PersistentMiddleware::class)->getPersistentMiddleware();
+    }
+
+    function flushState()
+    {
+        trigger('flush-state');
+    }
+
+    function originalUrl()
+    {
+        if ($this->isLivewireRequest()) {
+            return url()->to($this->originalPath());
         }
 
         return url()->current();
     }
 
-    public function getRootElementTagName($dom)
+    function originalPath()
     {
-        preg_match('/<([a-zA-Z0-9\-]*)/', $dom, $matches, PREG_OFFSET_CAPTURE);
+        if ($this->isLivewireRequest()) {
+            $snapshot = json_decode(request('components.0.snapshot'), true);
 
-        return $matches[1][0];
-    }
-
-    public function dispatch($event, ...$params)
-    {
-        foreach ($this->listeners[$event] ?? [] as $listener) {
-            $listener(...$params);
+            return data_get($snapshot, 'memo.path', 'POST');
         }
+
+        return request()->path();
     }
 
-    public function listen($event, $callback)
+    function originalMethod()
     {
-        $this->listeners[$event][] = $callback;
-    }
+        if ($this->isLivewireRequest()) {
+            $snapshot = json_decode(request('components.0.snapshot'), true);
 
-    public function isOnVapor()
-    {
-        return ($_ENV['SERVER_SOFTWARE'] ?? null) === 'vapor';
-    }
+            return data_get($snapshot, 'memo.method', 'POST');
+        }
 
-    public function withQueryParams($queryParams)
-    {
-        $this->queryParamsForTesting = $queryParams;
-
-        return $this;
+        return request()->method();
     }
 }

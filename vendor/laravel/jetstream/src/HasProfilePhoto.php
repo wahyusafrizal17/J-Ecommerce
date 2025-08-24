@@ -2,9 +2,9 @@
 
 namespace Laravel\Jetstream;
 
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
-use Laravel\Jetstream\Features;
 
 trait HasProfilePhoto
 {
@@ -12,14 +12,15 @@ trait HasProfilePhoto
      * Update the user's profile photo.
      *
      * @param  \Illuminate\Http\UploadedFile  $photo
+     * @param  string  $storagePath
      * @return void
      */
-    public function updateProfilePhoto(UploadedFile $photo)
+    public function updateProfilePhoto(UploadedFile $photo, $storagePath = 'profile-photos')
     {
-        tap($this->profile_photo_path, function ($previous) use ($photo) {
+        tap($this->profile_photo_path, function ($previous) use ($photo, $storagePath) {
             $this->forceFill([
                 'profile_photo_path' => $photo->storePublicly(
-                    'profile-photos', ['disk' => $this->profilePhotoDisk()]
+                    $storagePath, ['disk' => $this->profilePhotoDisk()]
                 ),
             ])->save();
 
@@ -40,6 +41,10 @@ trait HasProfilePhoto
             return;
         }
 
+        if (is_null($this->profile_photo_path)) {
+            return;
+        }
+
         Storage::disk($this->profilePhotoDisk())->delete($this->profile_photo_path);
 
         $this->forceFill([
@@ -50,13 +55,15 @@ trait HasProfilePhoto
     /**
      * Get the URL to the user's profile photo.
      *
-     * @return string
+     * @return \Illuminate\Database\Eloquent\Casts\Attribute
      */
-    public function getProfilePhotoUrlAttribute()
+    public function profilePhotoUrl(): Attribute
     {
-        return $this->profile_photo_path
+        return Attribute::get(function (): string {
+            return $this->profile_photo_path
                     ? Storage::disk($this->profilePhotoDisk())->url($this->profile_photo_path)
                     : $this->defaultProfilePhotoUrl();
+        });
     }
 
     /**
@@ -66,7 +73,11 @@ trait HasProfilePhoto
      */
     protected function defaultProfilePhotoUrl()
     {
-        return 'https://ui-avatars.com/api/?name='.urlencode($this->name).'&color=7F9CF5&background=EBF4FF';
+        $name = trim(collect(explode(' ', $this->name))->map(function ($segment) {
+            return mb_substr($segment, 0, 1);
+        })->join(' '));
+
+        return 'https://ui-avatars.com/api/?name='.urlencode($name).'&color=7F9CF5&background=EBF4FF';
     }
 
     /**
