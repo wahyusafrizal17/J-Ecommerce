@@ -7,7 +7,7 @@ use Illuminate\Http\Request;
 use App\Models\Category;
 use App\Models\Product;
 use App\Models\Brand;
-use App\Models\MultiImg;
+use App\Models\Multiimg;
 use App\Models\Products;
 use App\Models\OrderItem;
 use Carbon\Carbon;
@@ -86,7 +86,7 @@ class ProductController extends Controller
                 $save_img_path = 'upload/products/product_img/' . $make_img;
                 Image::make($img)->resize(917, 1000)->save(public_path($save_img_path));
 
-                MultiImg::insert([
+                Multiimg::insert([
                     'product_id' => $product_id,
                     'photo_name' => $save_img_path,
                     'created_at' => Carbon::now(),
@@ -148,7 +148,7 @@ class ProductController extends Controller
      */
     public function editProduct($id)
     {
-        $multipleImg = MultiImg::where('product_id', $id)->get();
+        $multipleImg = Multiimg::where('product_id', $id)->get();
         $brands = Brand::latest()->get();
         $categories = Category::latest()->get();
         $products = Products::findOrFail($id);
@@ -209,7 +209,7 @@ class ProductController extends Controller
     $imgs = $request->multiple_img;
 
     foreach ($imgs as $id => $img) {
-        $imgDel = MultiImg::findOrFail($id);
+        $imgDel = Multiimg::findOrFail($id);
 
         if (file_exists(public_path($imgDel->photo_name))) {
             unlink(public_path($imgDel->photo_name));
@@ -219,7 +219,7 @@ class ProductController extends Controller
         $save_path = 'upload/products/product_img/' . $make_img;
         Image::make($img)->resize(917, 1000)->save(public_path($save_path));
 
-        MultiImg::where('id', $id)->update([
+        Multiimg::where('id', $id)->update([
             'photo_name' => $save_path,
             'updated_at' => now(),
         ]);
@@ -267,9 +267,9 @@ class ProductController extends Controller
 
     public function imgsDelete($id)
     {
-        $imgs = MultiImg::findOrFail($id);
+        $imgs = Multiimg::findOrFail($id);
         unlink($imgs->photo_name);
-        MultiImg::findOrFail($id)->delete();
+        Multiimg::findOrFail($id)->delete();
 
         $notification = [
             'message' => 'Multiple Image Berhasil Di Delete!',
@@ -334,7 +334,7 @@ public function productDelete($id)
     }
 
     // Hapus semua gambar multiple
-    $multiImgs = MultiImg::where('product_id', $id)->get();
+            $multiImgs = Multiimg::where('product_id', $id)->get();
     foreach ($multiImgs as $img) {
         if (file_exists(public_path($img->photo_name))) {
             unlink(public_path($img->photo_name));

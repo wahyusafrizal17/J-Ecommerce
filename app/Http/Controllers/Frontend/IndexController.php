@@ -45,7 +45,7 @@ class IndexController extends Controller
     $product_size_ind = explode(',',$size_ind);
 
 
-    $multiImg = MultiImg::where('product_id', $id)->get();
+            $multiImg = Multiimg::where('product_id', $id)->get();
     $hotDeals = Products::where('hot_deals', 1)->orderBy('id','DESC')->limit(3)->get();
 
     $relatedProduct = Products::where('category_id',$product->category_id)->where('id','!=',$id)->orderBy('id','DESC')->get();
